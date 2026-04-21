@@ -8,14 +8,17 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
-#define TASK_STACK_SIZE 1024
+#define TASK_STACK_SIZE 2048
+#define MESSAGE_HANDLER_STACK_SIZE 2048
+
 #define MAX_MESSAGE_INDEX 20
 #define MAX_MESSAGE_LEN 100
+
+#define COMMON_TASK_PRIORITY 1
 
 SemaphoreHandle_t semA, semB, semC;
 TaskHandle_t TaskAHandle = NULL;
@@ -40,16 +43,23 @@ static inline message create_message(const char * string_input)
 	message my_message;
 	my_message.size = strlen(string_input) + 1;
 	my_message.data = pvPortMalloc(my_message.size);
-	memset(my_message.data, 0, my_message.size);
-	memcpy(my_message.data, string_input, my_message.size);
-
+	if (my_message.data == NULL)
+	{
+		my_message.size = 0;
+	}
+	else
+	{
+		memset(my_message.data, 0, my_message.size);
+		memcpy(my_message.data, string_input, my_message.size);
+	}
 	return my_message;
 }
 
-static inline void destroy_message(const message * msg)
+static inline void destroy_message(message * msg)
 {
 	if (msg == NULL) {return;}	
 	vPortFree(msg->data);
+	msg->data = NULL;
 }
 
 
@@ -67,28 +77,28 @@ void app_main(void)
 				"task a",
 				TASK_STACK_SIZE,
 				NULL,
-				1,
+				COMMON_TASK_PRIORITY,
 				&TaskAHandle);
 
 	xTaskCreate(taskB,
 				"task b",
 				TASK_STACK_SIZE,
 				NULL,
-				1,
+				COMMON_TASK_PRIORITY,
 				&TaskBHandle);
 
 	xTaskCreate(taskC,
 				"task c",
 				TASK_STACK_SIZE,
 				NULL,
-				1,
+				COMMON_TASK_PRIORITY,
 				&TaskCHandle);
 
 	xTaskCreate(taskMessageHandler,
 				"message handler task",
-				TASK_STACK_SIZE,
+				MESSAGE_HANDLER_STACK_SIZE,
 				NULL,
-				1,
+				COMMON_TASK_PRIORITY,
 				NULL);
 }
 
@@ -98,7 +108,10 @@ void taskA(void * params)
 	{
 		xSemaphoreTake(semA, portMAX_DELAY);
 		message msg = create_message("From Task A\n");
-		xQueueSend(MessageQueueHandle, &msg, portMAX_DELAY);
+		if (msg.data != NULL) {
+			if (xQueueSend(MessageQueueHandle, &msg, portMAX_DELAY) != pdTRUE)
+				destroy_message(&msg);
+		}
 		xSemaphoreGive(semB);
 	}
 }
@@ -109,7 +122,10 @@ void taskB(void * params)
 	{
 		xSemaphoreTake(semB, portMAX_DELAY);
 		message msg = create_message("From Task B\n");
-		xQueueSend(MessageQueueHandle, &msg, portMAX_DELAY);
+		if (msg.data != NULL) {
+			if (xQueueSend(MessageQueueHandle, &msg, portMAX_DELAY) != pdTRUE)
+				destroy_message(&msg);
+		}
 		xSemaphoreGive(semC);
 	}
 }
@@ -119,7 +135,10 @@ void taskC(void * params)
 	{
 		xSemaphoreTake(semC, portMAX_DELAY);
 		message msg = create_message("From Task C\n");
-		xQueueSend(MessageQueueHandle, &msg, portMAX_DELAY);
+		if (msg.data != NULL) {
+			if (xQueueSend(MessageQueueHandle, &msg, portMAX_DELAY) != pdTRUE)
+				destroy_message(&msg);	
+		}
 		xSemaphoreGive(semA);
 	}
 }
@@ -134,6 +153,7 @@ void taskMessageHandler(void * params)
 		{
 			printf("%s", msg_buffer.data);
 			destroy_message(& msg_buffer);	
+			msg_buffer.size = 0;
 		}
 	}	
 }
